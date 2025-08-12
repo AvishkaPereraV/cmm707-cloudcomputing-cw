@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  mysql-db:
+    image: mysql:8.0
+    container_name: mysql-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: cloud
+      MYSQL_USER: clouduser
+      MYSQL_PASSWORD: cloudpass
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    networks:
+      - lugx-net
+
+  clickhouse-server:
+    image: yandex/clickhouse-server
+    container_name: clickhouse-server
+    restart: always
+    ports:
+      - "8123:8123"
+    volumes:
+    - clickhouse_data:/var/lib/clickhouse
+    networks:
+      - lugx-net
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"] #test: ["CMD", "curl", "-f", "http://localhost:8123"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  game-service:
+    build:
+      context: ./game-service
+    container_name: game-service
+    restart: always
+    environment:
+      DB_HOST: mysql-db
+      DB_PORT: 3306
+      DB_NAME: cloud
+    ports:
+      - "8081:8000"
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+    networks:
+      - lugx-net
+    env_file:
+      - ./game-service/.env
+
+  order-service:
+    build:
+      context: ./order-service
+    container_name: order-service
+    restart: always
+    environment:
+      DB_HOST: mysql-db
+      DB_PORT: 3306
+      DB_NAME: cloud
+    ports:
+      - "8082:8000"
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+    networks:
+      - lugx-net
+    env_file:
+      - ./order-service/.env
+
+  analytics-service:
+    build:
+      context: ./analytics-service
+    container_name: analytics-service
+    restart: always
+    env_file:
+      - ./analytics-service/.env
+    ports:
+      - "8085:8000"
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+    networks:
+      - lugx-net
+
+  lugx-frontend:
+    build:
+      context: ./lugx-frontend
+    container_name: lugx-frontend
+    restart: always
+    ports:
+      - "8080:80"
+    networks:
+      - lugx-net
+
+networks:
+  lugx-net:
+
+volumes:
+  clickhouse_data:
+  mysql_data:

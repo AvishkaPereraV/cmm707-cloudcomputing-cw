@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: game-service
+spec:
+  selector:
+    app: game-service
+  type: NodePort
+  ports:
+    - port: 8000          # Cluster-internal access
+      targetPort: 8000    # Container app listens here
+      nodePort: 30801     # External access via localhost:30801

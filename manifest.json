@@ -1,0 +1,15 @@
+{
+  "fileLocations": [
+    {
+      "URIs": [
+        "s3://lugx-bucket/events_utf8.csv"
+      ]
+    }
+  ],
+  "globalUploadSettings": {
+    "format": "CSV",
+    "delimiter": ",",
+    "textqualifier": "\"",
+    "containsHeader": "true"
+  }
+}

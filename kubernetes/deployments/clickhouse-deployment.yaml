@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clickhouse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:latest
+        ports:
+          - containerPort: 8123
+          - containerPort: 9000
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+          # Mount users.xml as the file ClickHouse reads at startup
+          - name: ch-users
+            mountPath: /etc/clickhouse-server/users.d/default-user.xml
+            subPath: users.xml
+      volumes:
+        - name: ch-users
+          configMap:
+            name: ch-users

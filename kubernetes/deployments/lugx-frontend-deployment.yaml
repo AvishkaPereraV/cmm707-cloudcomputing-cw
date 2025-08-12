@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lugx-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lugx-frontend
+  template:
+    metadata:
+      labels:
+        app: lugx-frontend
+    spec:
+      containers:
+        - name: lugx-frontend
+          image: lugx-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80

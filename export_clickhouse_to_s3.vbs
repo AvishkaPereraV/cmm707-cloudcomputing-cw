@@ -1,0 +1,2 @@
+Set objShell = CreateObject("Wscript.Shell")
+objShell.Run "powershell -NoProfile -ExecutionPolicy Bypass -File ""C:\Users\Savindri Perera\Documents\CloudComputingCW\export_clickhouse_to_s3.ps1""", 0, False

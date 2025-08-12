@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-server
+    ports:
+      - "8123:8123"   # HTTP Interface (for browser access)
+      - "9000:9000"   # Native Client Port (for ClickHouse CLI)
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    restart: always
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+
+volumes:
+  clickhouse-data:
