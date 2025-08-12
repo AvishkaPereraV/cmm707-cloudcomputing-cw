@@ -16,7 +16,7 @@ spec:
         - name: analytics-service
           image: avishka20241889/analytics-service:latest
           ports:
-            - containerPort: 8002
+            - containerPort: 8000
 ---
 apiVersion: v1
 kind: Service
@@ -27,6 +27,6 @@ spec:
     app: analytics-service
   ports:
     - protocol: TCP
-      port: 8002
-      targetPort: 8002
+      port: 8000
+      targetPort: 8000
   type: ClusterIP
