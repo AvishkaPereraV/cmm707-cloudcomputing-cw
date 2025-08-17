@@ -23,20 +23,13 @@ jobs:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 
-      - name: Install kubectl (Windows) without choco
+      - name: Install kubectl (Windows)
         shell: powershell
         run: |
-          $kubectl = Join-Path $env:RUNNER_TEMP 'kubectl.exe'
-          if (-not (Test-Path $kubectl)) {
-            $ver = (Invoke-RestMethod -UseBasicParsing https://dl.k8s.io/release/stable.txt).Trim()
-            $url = "https://dl.k8s.io/release/$ver/bin/windows/amd64/kubectl.exe"
-            Write-Host "Downloading kubectl $ver from $url"
-            Invoke-WebRequest -Uri $url -OutFile $kubectl -UseBasicParsing
-          }
-          # make it available to subsequent steps
-          $env:PATH = "$env:RUNNER_TEMP;$env:PATH"
+          choco install kubernetes-cli -y
+          # refresh PATH for this session
+          $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
           kubectl version --client
-
 
       - name: Configure kubeconfig
         shell: powershell
