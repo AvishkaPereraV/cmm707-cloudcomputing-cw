@@ -22,14 +22,15 @@ jobs:
         run: |
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'   # or pin: 'v1.29.4'
 
-      - name: Install kubectl (Windows)
+      - name: Check kubectl
         shell: powershell
-        run: |
-          choco install kubernetes-cli -y
-          # refresh PATH for this session
-          $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
-          kubectl version --client
+        run: kubectl version --client
+
 
       - name: Configure kubeconfig
         shell: powershell
