@@ -82,25 +82,35 @@ jobs:
             Stop-Process -Id $pf.Id -Force
           }
 
+      # Smoke test – frontend HTTP 200
       - name: Smoke test – frontend HTTP 200
         shell: powershell
         run: |
-          # Try to get the URL from minikube (handles NodePort/LoadBalancer)
-          $url = (minikube service frontend --url | Select-Object -First 1).Trim()
+          # Get the NodePort exposed by the frontend Service
+          $nodePort = kubectl get svc frontend -o jsonpath='{.spec.ports[0].nodePort}'
 
-          if (-not $url) {
-            # Fallback: build URL from Node IP + NodePort
-            $nodePort = kubectl get svc frontend -o jsonpath='{.spec.ports[0].nodePort}'
-            $nodeIP   = (minikube ip).Trim()
-            $url = "http://$nodeIP:$nodePort"
-          }
+          # Get an address you can reach from the runner
+          # Prefer the host IP (minikube ip), fall back to localhost if needed
+          $nodeIP = (minikube ip) 2>$null
+          if (-not $nodeIP) { $nodeIP = "127.0.0.1" }
 
+          # IMPORTANT: use ${var} before a ':' so PowerShell parses it correctly
+          $url = "http://${nodeIP}:${nodePort}"
           Write-Host "Testing $url"
-          $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
-          if ($resp.StatusCode -ne 200) {
-            throw "Frontend returned $($resp.StatusCode)"
+
+          # A short wait helps right after a rollout
+          Start-Sleep -Seconds 3
+
+          # Basic 200 check
+          try {
+            $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 20
+            if ($r.StatusCode -ne 200) { throw "Frontend returned $($r.StatusCode)" }
+            Write-Host "Frontend OK"
+          } catch {
+            Write-Error $_
+            throw
           }
-          Write-Host "Frontend OK"
+
 
 
 
