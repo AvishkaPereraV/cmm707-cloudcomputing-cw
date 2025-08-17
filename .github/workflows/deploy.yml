@@ -39,6 +39,10 @@ jobs:
           kubectl config current-context
           kubectl get nodes
 
+      - name: Verify cluster is up
+        shell: powershell
+        run: kubectl version --short
+
       - name: Set images to :latest
         shell: powershell
         run: |
