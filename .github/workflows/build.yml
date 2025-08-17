@@ -19,7 +19,7 @@ jobs:
       matrix:
         include:
           - id: lugx-frontend
-            image: frontend                   # docker image repo suffix
+            image: frontend
             context: ./lugx-frontend
           - id: game-service
             image: game-service
