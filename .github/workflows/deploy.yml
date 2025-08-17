@@ -82,36 +82,17 @@ jobs:
             Stop-Process -Id $pf.Id -Force
           }
 
-      # Smoke test – frontend HTTP 200
       - name: Smoke test – frontend HTTP 200
         shell: powershell
         run: |
-          # Get the NodePort exposed by the frontend Service
-          $nodePort = kubectl get svc frontend -o jsonpath='{.spec.ports[0].nodePort}'
-
-          # Get an address you can reach from the runner
-          # Prefer the host IP (minikube ip), fall back to localhost if needed
-          $nodeIP = (minikube ip) 2>$null
-          if (-not $nodeIP) { $nodeIP = "127.0.0.1" }
-
-          # IMPORTANT: use ${var} before a ':' so PowerShell parses it correctly
-          $url = "http://${nodeIP}:${nodePort}"
-          Write-Host "Testing $url"
-
-          # A short wait helps right after a rollout
-          Start-Sleep -Seconds 3
-
-          # Basic 200 check
+          # forward frontend Service's port 80 to localhost:18080
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/frontend 18080:80'
           try {
-            $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 20
+            Start-Sleep -Seconds 5
+            $r = Invoke-WebRequest -Uri http://127.0.0.1:18080 -UseBasicParsing -TimeoutSec 20
             if ($r.StatusCode -ne 200) { throw "Frontend returned $($r.StatusCode)" }
             Write-Host "Frontend OK"
-          } catch {
-            Write-Error $_
-            throw
+          } finally {
+            Stop-Process -Id $pf.Id -Force
           }
-
-
-
-
 
