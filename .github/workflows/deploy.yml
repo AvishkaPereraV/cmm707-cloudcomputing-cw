@@ -85,18 +85,24 @@ jobs:
       - name: Smoke test – frontend HTTP 200
         shell: powershell
         run: |
-          # pick the service port exposed by frontend Service (usually 80)
-          $local = 18080
-          $target = 80
-          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/frontend $local:$target"
+          # Pick NodePort for frontend
+          $nodePort = kubectl get svc frontend -o jsonpath='{.spec.ports[0].nodePort}'
+          $local  = "127.0.0.1"
+          $target = $nodePort
+
+          # Start a background port-forward and give it a moment
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/frontend $local`:$target"
+          Start-Sleep -Seconds 3
+
           try {
-            Start-Sleep -Seconds 3
-            $url = "http://127.0.0.1:$local"
+            $url = "http://$local:$target"
             Write-Host "Testing $url"
             $r = Invoke-WebRequest -Uri $url -UseBasicParsing
             if ($r.StatusCode -ne 200) { throw "Frontend returned $($r.StatusCode)" }
             Write-Host "Frontend OK"
-          } finally {
+          }
+          finally {
             if ($pf -and !$pf.HasExited) { Stop-Process -Id $pf.Id -Force }
           }
+
 
