@@ -58,6 +58,10 @@ def bootstrap_clickhouse():
 def health():
     return {"status": "ok", "db": CLICKHOUSE_DB, "table": CLICKHOUSE_TABLE}
 
+@app.get("/health", tags=["health"])
+def healthz():
+    return {"status": "ok"}
+
 @app.post("/track")
 async def track_event(event: AnalyticsEvent):
     try:
