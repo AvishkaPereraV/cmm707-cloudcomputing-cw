@@ -3,30 +3,36 @@ name: Deploy & Test
 on:
   workflow_run:
     workflows: ["Build & Push Images"]
-    types: [completed]
+    types: [completed]       # We'll gate on success in an if: below
   workflow_dispatch:
 
 jobs:
   deploy:
+    # Only run if the upstream workflow_run concluded successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: self-hosted
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      # kubectl on Windows self-hosted runner
       - name: Install kubectl (Windows)
         shell: powershell
-        run: choco install kubernetes-cli -y
+        run: |
+          choco install kubernetes-cli -y
+          # refresh PATH for this session
+          $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
+          kubectl version --client
 
       - name: Configure kubeconfig
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path "$HOME\.kube" | Out-Null
-          # write kubeconfig from secret (already base64)
           [IO.File]::WriteAllBytes("$HOME\.kube\config",[Convert]::FromBase64String("${{ secrets.KUBE_CONFIG_DATA }}"))
+          kubectl config current-context
+          kubectl get nodes
 
-      - name: Set images to latest (no YAML changes required)
+      - name: Set images to :latest
         shell: powershell
         run: |
           kubectl set image deploy/game-service        game-service=${{ secrets.DOCKERHUB_USERNAME }}/game-service:latest
@@ -34,7 +40,7 @@ jobs:
           kubectl set image deploy/analytics-service   analytics-service=${{ secrets.DOCKERHUB_USERNAME }}/analytics-service:latest
           kubectl set image deploy/frontend            frontend=${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest
 
-      - name: Wait for rollouts (rolling update, zero downtime)
+      - name: Wait for rollouts (zero-downtime rolling update)
         shell: powershell
         run: |
           kubectl rollout status deploy/game-service        --timeout=180s
@@ -45,20 +51,17 @@ jobs:
       - name: Smoke test – analytics POST
         shell: powershell
         run: |
-          # forward analytics-service:8000 -> localhost:18002
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/analytics-service 18002:8000'
-          Start-Sleep -Seconds 3
-
-          $payload = @{
-            event_type = "page_view"
-            page_url   = "/"
-            user_agent = "ci-test"
-            session_id = "ci-${{ github.run_id }}"
-            ts         = (Get-Date).ToString("o")
-          } | ConvertTo-Json
-
+          Start-Sleep -Seconds 4
           try {
-            $res = Invoke-RestMethod -Uri http://localhost:18002/track -Method POST -ContentType 'application/json' -Body $payload
+            $payload = @{
+              event_type = "page_view"
+              page_url   = "/"
+              user_agent = "ci-test"
+              session_id = "ci-${{ github.run_id }}"
+              ts         = (Get-Date).ToString("o")
+            } | ConvertTo-Json
+            Invoke-RestMethod -Uri http://localhost:18002/track -Method POST -ContentType 'application/json' -Body $payload | Out-Null
             Write-Host "Analytics POST OK"
           } finally {
             Stop-Process -Id $pf.Id -Force
@@ -67,10 +70,10 @@ jobs:
       - name: Smoke test – frontend HTTP 200
         shell: powershell
         run: |
-          # get NodePort for 'frontend'
           $nodePort = kubectl get svc frontend -o jsonpath='{.spec.ports[0].nodePort}'
           $url = "http://127.0.0.1:$nodePort"
           Write-Host "Testing $url"
+          Start-Sleep -Seconds 3
           $r = Invoke-WebRequest -Uri $url -UseBasicParsing
           if ($r.StatusCode -ne 200) { throw "Frontend returned $($r.StatusCode)" }
           Write-Host "Frontend OK"
