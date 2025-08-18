@@ -1,0 +1,92 @@
+# -------------------------------
+# ORDER SERVICE - BLUE deployment
+# -------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service-blue
+  labels:
+    app: order-service
+    color: blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+      color: blue
+  template:
+    metadata:
+      labels:
+        app: order-service
+        color: blue
+    spec:
+      containers:
+        - name: order-service
+          image: avishka20241889/order-service:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /orders
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+
+---
+# ---------------------------------
+# ORDER SERVICE - GREEN deployment
+# ---------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service-green
+  labels:
+    app: order-service
+    color: green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+      color: green
+  template:
+    metadata:
+      labels:
+        app: order-service
+        color: green
+    spec:
+      containers:
+        - name: order-service
+          image: avishka20241889/order-service:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /orders
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+
+---
+# ---------------------------------------
+# SINGLE SERVICE - points to ONE color
+# ---------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  selector:
+    app: order-service
+    color: blue    # <--- initial live color (flip this in CI)
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
