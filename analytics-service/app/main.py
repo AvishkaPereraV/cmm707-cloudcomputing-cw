@@ -73,5 +73,4 @@ async def track_event(event: AnalyticsEvent):
     
 @app.get("/health")
 def health():
-    # shallow: process is up, event loop OK
     return {"status": "ok"}

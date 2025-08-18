@@ -17,7 +17,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Allow PowerShell scripts for this job
+      - name: Allow PowerShell scripts for this runner
+        shell: cmd
+        run: |
+          powershell -NoProfile -Command "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force"
+          powershell -NoProfile -Command "Get-ExecutionPolicy -List"
+
+      - name: Allow PowerShell scripts for this job (process scope)
         shell: powershell
         run: |
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
