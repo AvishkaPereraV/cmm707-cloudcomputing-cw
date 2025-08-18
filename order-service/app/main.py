@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app import models, database
 from app.models import Order
 from pydantic import BaseModel
@@ -24,6 +25,15 @@ def get_db():
 @app.get("/")
 def read_root():
     return {"message": "Order Service API is running."}
+
+# Health endpoint used by probes and CI
+@app.get("/health")
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db check failed: {str(e)}")
 
 # GET endpoint - all
 @app.get("/orders")
