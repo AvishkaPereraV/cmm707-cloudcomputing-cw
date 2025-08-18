@@ -52,7 +52,6 @@ jobs:
         shell: powershell
         run: |
           kubectl set image deploy/game-service        game-service=${{ secrets.DOCKERHUB_USERNAME }}/game-service:latest
-          kubectl set image deploy/order-service       order-service=${{ secrets.DOCKERHUB_USERNAME }}/order-service:latest
           kubectl set image deploy/analytics-service   analytics-service=${{ secrets.DOCKERHUB_USERNAME }}/analytics-service:latest
           kubectl set image deploy/frontend            frontend=${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest
 

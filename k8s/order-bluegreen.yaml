@@ -27,14 +27,23 @@ spec:
             - containerPort: 8000
           readinessProbe:
             httpGet:
-              path: /orders
+              path: /health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
             successThreshold: 1
-
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+            
 ---
 # ---------------------------------
 # ORDER SERVICE - GREEN deployment
@@ -65,9 +74,18 @@ spec:
             - containerPort: 8000
           readinessProbe:
             httpGet:
-              path: /orders
+              path: /health
               port: 8000
             initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+            successThreshold: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
