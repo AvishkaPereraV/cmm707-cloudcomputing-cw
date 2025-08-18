@@ -144,44 +144,59 @@ jobs:
       - name: Blue-Green deploy – order-service
         shell: powershell
         run: |
-          # 1) Find current live color by inspecting Service selector
+          # --- 1) Read current live color from Service selector ---
           $svc = kubectl get svc order-service -o json | ConvertFrom-Json
-          $currentColor = $svc.spec.selector.color
+          $currentColor = $null
+          if ($svc.spec -and $svc.spec.selector -and $svc.spec.selector.color) {
+            $currentColor = $svc.spec.selector.color
+          }
+
           if ([string]::IsNullOrEmpty($currentColor)) {
-            throw "order-service Service has no 'color' selector – did you apply the blue/green manifests?"
+            throw "order-service Service has no 'color' selector. Did you apply the blue/green manifests first?"
           }
           Write-Host "Current live color:" $currentColor
 
-          # 2) Pick the inactive color
+          # --- 2) Decide inactive color ---
           $inactive = if ($currentColor -eq "blue") { "green" } else { "blue" }
           Write-Host "Inactive color (target for new version):" $inactive
 
-          # 3) Update the inactive Deployment to the new image
+          # --- 3) Update the INACTIVE deployment to latest image ---
           $deployName = "order-service-$inactive"
           $image = "${{ secrets.DOCKERHUB_USERNAME }}/order-service:latest"
           kubectl set image deploy/$deployName order-service=$image
 
-          # 4) Wait for pods of inactive color to become Ready
+          # --- 4) Wait until new pods are ready ---
           kubectl rollout status deploy/$deployName --timeout=180s
 
-          # 5) Smoke test against the INACTIVE color by targeting pods with 'color=$inactive'
-          #    We port-forward to a random pod with the target color labels.
-          $pod = (kubectl get pod -l app=order-service,color=$inactive -o jsonpath='{.items[0].metadata.name}')
-          if (-not $pod) { throw "No pod found for order-service color $inactive" }
+          # --- 5) Smoke test INACTIVE color (pod with label color=$inactive) ---
+          $pod = kubectl get pod -l app=order-service,color=$inactive -o jsonpath='{.items[0].metadata.name}'
+          if ([string]::IsNullOrWhiteSpace($pod)) {
+            throw "No pod found for order-service color '$inactive'."
+          }
 
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward pod/$pod 18003:8000"
           try {
             Start-Sleep -Seconds 4
-            # Simple GET should return 200 (list orders)
-            $resp = Invoke-WebRequest -Uri http://127.0.0.1:18003/orders -UseBasicParsing -TimeoutSec 15
-            if ($resp.StatusCode -ne 200) { throw "order-service $inactive /orders returned $($resp.StatusCode)" }
-            Write-Host "order-service $inactive passed smoke test."
+            $ordersResp = Invoke-WebRequest -Uri http://127.0.0.1:18003/orders -UseBasicParsing -TimeoutSec 20
+            if ($ordersResp.StatusCode -ne 200) {
+              throw "order-service ($inactive) /orders returned $($ordersResp.StatusCode)"
+            }
+            Write-Host "order-service ($inactive) passed smoke test."
           } finally {
             Stop-Process -Id $pf.Id -Force
           }
 
-          # 6) Flip the Service selector to the INACTIVE color (promote to live)
-          kubectl patch svc order-service --type='merge' -p "{`"spec`":{`"selector`":{`"app`":`"order-service`",`"color`":`"$inactive`"}}}"
+          # --- 6) Flip Service selector to INACTIVE color (promote) ---
+          $patchObj = @{
+            spec = @{
+              selector = @{
+                app   = "order-service"
+                color = $inactive
+              }
+            }
+          }
+          # Convert to JSON; 10 ensures deep enough depth
+          $patchJson = $patchObj | ConvertTo-Json -Depth 10
+          kubectl patch svc order-service --type merge -p $patchJson | Out-Host
+
           Write-Host "Traffic switched to color:" $inactive
-
-
