@@ -1,0 +1,103 @@
+name: Periodic Integration Tests
+
+on:
+  schedule:
+    # Every 6 hours (UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: [self-hosted, Windows, X64]
+
+    steps:
+      - name: Checkout (minimal)
+        uses: actions/checkout@v3
+
+      # Allow PS in this job (process scope) on the runner
+      - name: Allow PowerShell scripts (process scope)
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubeconfig
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "$HOME\.kube" | Out-Null
+          [IO.File]::WriteAllBytes("$HOME\.kube\config",[Convert]::FromBase64String("${{ secrets.KUBE_CONFIG_DATA }}"))
+          $env:KUBECONFIG = "$HOME\.kube\config"
+          kubectl config current-context
+          kubectl get nodes -o wide
+
+      # ---------- SAME TESTS THAT RUN AFTER DEPLOY ----------
+
+      - name: Smoke test – analytics POST
+        shell: powershell
+        run: |
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/analytics-service 18002:8000'
+          Start-Sleep -Seconds 4
+          try {
+            $payload = @{
+              event_type = "page_view"
+              page_url   = "/"
+              user_agent = "ci-periodic"
+              session_id = "ci-${{ github.run_id }}"
+              ts         = (Get-Date).ToString("o")
+            } | ConvertTo-Json
+            Invoke-RestMethod -Uri http://127.0.0.1:18002/track -Method POST -ContentType 'application/json' -Body $payload | Out-Null
+            Write-Host "Analytics POST OK"
+          } finally {
+            Stop-Process -Id $pf.Id -Force
+          }
+
+      - name: Smoke test – frontend HTTP 200
+        shell: powershell
+        run: |
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/frontend 18080:80'
+          try {
+            Start-Sleep -Seconds 5
+            $r = Invoke-WebRequest -Uri http://127.0.0.1:18080 -UseBasicParsing -TimeoutSec 20
+            if ($r.StatusCode -ne 200) { throw "Frontend returned $($r.StatusCode)" }
+            Write-Host "Frontend OK"
+          } finally {
+            Stop-Process -Id $pf.Id -Force
+          }
+
+      - name: Smoke test – game-service /health and list /games
+        shell: powershell
+        run: |
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/game-service 18001:8000'
+          try {
+            Start-Sleep -Seconds 4
+            $h = Invoke-RestMethod -Uri http://127.0.0.1:18001/health -TimeoutSec 15
+            if ($h.status -ne "ok") { throw "game-service /health not ok" }
+            $g = Invoke-WebRequest -Uri http://127.0.0.1:18001/games -UseBasicParsing -TimeoutSec 15
+            if ($g.StatusCode -ne 200) { throw "/games returned $($g.StatusCode)" }
+            Write-Host "game-service OK"
+          } finally {
+            Stop-Process -Id $pf.Id -Force
+          }
+
+      - name: Smoke test – order-service /health and list /orders
+        shell: powershell
+        run: |
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/order-service 18003:8000'
+          try {
+            Start-Sleep -Seconds 4
+
+            $h = Invoke-RestMethod -Uri http://127.0.0.1:18003/health -TimeoutSec 15
+            if ($h.status -ne "ok") { throw "order-service /health not ok" }
+
+            $r = Invoke-WebRequest -Uri http://127.0.0.1:18003/orders -UseBasicParsing -TimeoutSec 15
+            if ($r.StatusCode -ne 200) { throw "/orders returned $($r.StatusCode)" }
+
+            Write-Host "order-service OK"
+          }
+          finally {
+            Stop-Process -Id $pf.Id -Force
+          }
