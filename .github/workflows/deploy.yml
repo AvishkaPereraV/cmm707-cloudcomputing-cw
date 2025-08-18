@@ -199,6 +199,7 @@ jobs:
           finally {
             if ($pf -and (Get-Process -Id $pf.Id -ErrorAction SilentlyContinue)) {
               Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue
+            }
           }
 
           # --- 6) Flip Service selector to INACTIVE color (promote) ---
