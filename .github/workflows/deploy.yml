@@ -37,14 +37,14 @@ jobs:
         shell: powershell
         run: kubectl version --client
 
-
       - name: Configure kubeconfig
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path "$HOME\.kube" | Out-Null
           [IO.File]::WriteAllBytes("$HOME\.kube\config",[Convert]::FromBase64String("${{ secrets.KUBE_CONFIG_DATA }}"))
+          $env:KUBECONFIG = "$HOME\.kube\config"
           kubectl config current-context
-          kubectl get nodes
+          kubectl get nodes -o wide
 
       - name: Verify cluster is up
         shell: powershell
