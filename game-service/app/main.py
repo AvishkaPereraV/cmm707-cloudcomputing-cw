@@ -5,6 +5,7 @@ from app.models import Game
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
+from sqlalchemy import text
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -27,6 +28,20 @@ def get_db():
 @app.get("/")
 def read_root():
     return {"message": "Game Service API is running."}
+
+@app.get("/health")
+def health(db: Session = Depends(get_db)):
+    """
+    Liveness/Readiness check:
+    - Confirms the FastAPI app is up
+    - Confirms DB connection works
+    """
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception as e:
+        # Raising 500 makes readiness/liveness fail until it becomes healthy.
+        raise HTTPException(status_code=500, detail=f"db check failed: {str(e)}")
 
 # GET endpoint - all
 @app.get("/games")
