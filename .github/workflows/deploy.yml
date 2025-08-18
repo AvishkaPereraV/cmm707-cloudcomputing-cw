@@ -59,7 +59,6 @@ jobs:
         shell: powershell
         run: |
           kubectl rollout status deploy/game-service        --timeout=180s
-          kubectl rollout status deploy/order-service       --timeout=180s
           kubectl rollout status deploy/analytics-service   --timeout=180s
           kubectl rollout status deploy/frontend            --timeout=180s
 
@@ -143,15 +142,22 @@ jobs:
       - name: Blue-Green deploy – order-service
         shell: powershell
         run: |
+          # --- 0) Ensure blue/green resources exist (first run safety) ---
+          if (-not (kubectl get deploy order-service-blue -o name 2>$null) `
+              -or -not (kubectl get deploy order-service-green -o name 2>$null) `
+              -or -not (kubectl get svc order-service -o name 2>$null)) {
+            Write-Host "Applying k8s/order-bluegreen.yaml (first-run bootstrap)…"
+            kubectl apply -f k8s/order-bluegreen.yaml
+          }
+
           # --- 1) Read current live color from Service selector ---
           $svc = kubectl get svc order-service -o json | ConvertFrom-Json
           $currentColor = $null
           if ($svc.spec -and $svc.spec.selector -and $svc.spec.selector.color) {
             $currentColor = $svc.spec.selector.color
           }
-
           if ([string]::IsNullOrEmpty($currentColor)) {
-            throw "order-service Service has no 'color' selector. Did you apply the blue/green manifests first?"
+            throw "order-service Service has no 'color' selector. Did you apply the blue/green manifests?"
           }
           Write-Host "Current live color:" $currentColor
 
@@ -159,19 +165,17 @@ jobs:
           $inactive = if ($currentColor -eq "blue") { "green" } else { "blue" }
           Write-Host "Inactive color (target for new version):" $inactive
 
-          # --- 3) Update the INACTIVE deployment to latest image ---
+          # --- 3) Update INACTIVE deployment to the new image ---
           $deployName = "order-service-$inactive"
           $image = "${{ secrets.DOCKERHUB_USERNAME }}/order-service:latest"
           kubectl set image deploy/$deployName order-service=$image
 
-          # --- 4) Wait until new pods are ready ---
+          # --- 4) Wait until new pods are Ready ---
           kubectl rollout status deploy/$deployName --timeout=180s
 
-          # --- 5) Smoke test INACTIVE color (pod with label color=$inactive) ---
+          # --- 5) Smoke test INACTIVE color directly (by pod label) ---
           $pod = kubectl get pod -l app=order-service,color=$inactive -o jsonpath='{.items[0].metadata.name}'
-          if ([string]::IsNullOrWhiteSpace($pod)) {
-            throw "No pod found for order-service color '$inactive'."
-          }
+          if ([string]::IsNullOrWhiteSpace($pod)) { throw "No pod found for order-service color '$inactive'." }
 
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward pod/$pod 18003:8000"
           try {
@@ -180,22 +184,27 @@ jobs:
             if ($ordersResp.StatusCode -ne 200) {
               throw "order-service ($inactive) /orders returned $($ordersResp.StatusCode)"
             }
-            Write-Host "order-service ($inactive) passed smoke test."
+            Write-Host "Inactive color '$inactive' passed smoke test."
           } finally {
             Stop-Process -Id $pf.Id -Force
           }
 
           # --- 6) Flip Service selector to INACTIVE color (promote) ---
-          $patchObj = @{
-            spec = @{
-              selector = @{
-                app   = "order-service"
-                color = $inactive
-              }
-            }
-          }
-          # Convert to JSON; 10 ensures deep enough depth
+          $patchObj = @{ spec = @{ selector = @{ app = "order-service"; color = $inactive } } }
           $patchJson = $patchObj | ConvertTo-Json -Depth 10
           kubectl patch svc order-service --type merge -p $patchJson | Out-Host
 
-          Write-Host "Traffic switched to color:" $inactive
+          # --- 7) Verify the Service now routes to the new color and still works ---
+          $now = kubectl get svc order-service -o jsonpath='{.spec.selector.color}'
+          Write-Host "Service now points to color: $now"
+          if ($now -ne $inactive) { throw "Service selector did not flip (expected '$inactive', got '$now')." }
+
+          $pf2 = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/order-service 18003:8000"
+          try {
+            Start-Sleep -Seconds 4
+            $final = Invoke-WebRequest -Uri http://127.0.0.1:18003/orders -UseBasicParsing -TimeoutSec 20
+            if ($final.StatusCode -ne 200) { throw "order-service via Service failed post-flip ($($final.StatusCode))" }
+            Write-Host "order-service via Service OK after flip."
+          } finally {
+            Stop-Process -Id $pf2.Id -Force
+          }
