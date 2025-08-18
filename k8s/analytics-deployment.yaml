@@ -31,7 +31,7 @@ spec:
                   key: password
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 5

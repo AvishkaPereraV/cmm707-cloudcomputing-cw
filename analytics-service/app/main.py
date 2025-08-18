@@ -71,20 +71,7 @@ async def track_event(event: AnalyticsEvent):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ClickHouse insert failed: {str(e)}")
     
-# ---- Health endpoints ----
 @app.get("/health")
 def health():
     # shallow: process is up, event loop OK
     return {"status": "ok"}
-
-@app.get("/ready")
-def ready():
-    # deeper: optional dependency check
-    try:
-        client = get_client_with_retry(retries=1, delay=0.1)  # quick try
-        client.ping()  # cheap connectivity check
-        return {"status": "ready"}
-    except Exception:
-        # if ClickHouse is briefly down, stay 'not ready' but don't crash
-        raise HTTPException(status_code=503, detail="dependency not ready")
-
