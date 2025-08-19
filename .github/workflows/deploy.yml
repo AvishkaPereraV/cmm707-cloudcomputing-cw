@@ -203,9 +203,13 @@ jobs:
           }
 
           # --- 6) Flip Service selector to INACTIVE color (promote) ---
-          $patchObj = @{ spec = @{ selector = @{ app = "order-service"; color = $inactive } } }
-          $patchJson = $patchObj | ConvertTo-Json -Depth 10
-          kubectl patch svc order-service --type merge -p $patchJson | Out-Host
+          $patch = '{"spec":{"selector":{"app":"order-service","color":"' + $inactive + '"}}}'
+          kubectl patch service order-service --type=merge -p $patch
+
+          # Verify flip
+          $now = kubectl get svc order-service -o jsonpath='{.spec.selector.color}'
+          Write-Host "Service now points to color: $now"
+          if ($now -ne $inactive) { throw "Service selector did not flip (expected '$inactive', got '$now')." }
 
           # --- (7) Verify via Service after flip
           $pf2 = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/order-service 18003:8000"
