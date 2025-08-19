@@ -203,17 +203,50 @@ jobs:
           }
 
           # --- 6) Flip Service selector to INACTIVE color (promote) ---
-          # Build JSON as a here-string so quotes are preserved on Windows PowerShell
-          $patch = @"
-          {"spec":{"selector":{"app":"order-service","color":"$inactive"}}}
-          "@
 
-          kubectl patch service order-service --type=merge -p $patch
+          # Fail fast on any errors in this block
+          $oldPref = $ErrorActionPreference; $ErrorActionPreference = 'Stop'
+          try {
+            # Build the patch object and write it to a temp file as UTF-8 without BOM
+            $patchObj = @{
+              spec = @{
+                selector = @{
+                  app   = "order-service"
+                  color = $inactive
+                }
+              }
+            }
+            $patchJson = $patchObj | ConvertTo-Json -Depth 10
 
-          # Verify flip
-          $now = kubectl get svc order-service -o jsonpath='{.spec.selector.color}'
-          Write-Host "Service now points to color: $now"
-          if ($now -ne $inactive) { throw "Service selector did not flip (expected '$inactive', got '$now')." }
+            $tmp = Join-Path $env:TEMP ("svc-patch-{0}.json" -f ([System.Guid]::NewGuid()))
+            # Use -AsByteStream to avoid BOM; write plain UTF-8
+            [System.IO.File]::WriteAllText($tmp, $patchJson, (New-Object System.Text.UTF8Encoding($false)))
+
+            # Apply patch from file (avoids PowerShell quoting/CRLF pitfalls)
+            kubectl patch service order-service --type=merge --patch-file="$tmp"
+
+            # Verify flip
+            $now = kubectl get svc order-service -o jsonpath='{.spec.selector.color}'
+            Write-Host "Service now points to color: $now"
+            if ($now -ne $inactive) {
+              throw "Service selector did not flip (expected '$inactive', got '$now')."
+            }
+          }
+          catch {
+            Write-Host "Patch via --patch-file failed or selector didn't flip. Trying 'kubectl set selector' as fallback..."
+            # Fallback path (no --overwrite flag on this command)
+            kubectl set selector service/order-service "app=order-service,color=$inactive"
+
+            $now2 = kubectl get svc order-service -o jsonpath='{.spec.selector.color}'
+            Write-Host "Service now points to color (after fallback): $now2"
+            if ($now2 -ne $inactive) {
+              throw "Service selector still didn't flip (expected '$inactive', got '$now2')."
+            }
+          }
+          finally {
+            if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+            $ErrorActionPreference = $oldPref
+          }
 
           # --- (7) Verify via Service after flip
           $pf2 = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/order-service 18003:8000"
