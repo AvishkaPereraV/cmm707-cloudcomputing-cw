@@ -16,7 +16,7 @@ spec:
       maxUnavailable: 1
       maxSurge: 0
   revisionHistoryLimit: 2
-  progressDeadlineSeconds: 180
+  progressDeadlineSeconds: 300 #180
   selector:
     matchLabels:
       app: analytics-service
@@ -30,6 +30,7 @@ spec:
       containers:
         - name: analytics-service
           image: avishka20241889/analytics-service:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -37,16 +38,16 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 5
             timeoutSeconds: 2
-            failureThreshold: 6
+            failureThreshold: 12
           livenessProbe:
             tcpSocket: { port: 8000 }
             initialDelaySeconds: 45
             periodSeconds: 10
             timeoutSeconds: 2
-            failureThreshold: 3
+            failureThreshold: 6
           startupProbe:
             tcpSocket: { port: 8000 }
-            failureThreshold: 30   # up to ~60s with period=2
+            failureThreshold: 30
             periodSeconds: 2
             timeoutSeconds: 2
 
@@ -69,7 +70,7 @@ spec:
       maxUnavailable: 1
       maxSurge: 0
   revisionHistoryLimit: 2
-  progressDeadlineSeconds: 180
+  progressDeadlineSeconds: 300 #180
   selector:
     matchLabels:
       app: analytics-service
@@ -83,6 +84,7 @@ spec:
       containers:
         - name: analytics-service
           image: avishka20241889/analytics-service:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -99,6 +101,11 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
+          startupProbe:
+            tcpSocket: { port: 8000 }
+            failureThreshold: 30
+            periodSeconds: 2
+            timeoutSeconds: 2
 
 ---
 # ---------------------------------------
