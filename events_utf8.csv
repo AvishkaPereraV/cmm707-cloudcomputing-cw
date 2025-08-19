@@ -1,4 +1,6 @@
 "event_type","page_url","user_agent","session_id","ts"
+"page_view","/","ci-test","ci-17056450810","1970-01-01 00:00:00"
+"page_view","/","ci-test","ci-17056408870","1970-01-01 00:00:00"
 "page_view","/","ci-test","ci-17056260777","1970-01-01 00:00:00"
 "page_view","/","test","test-local","1970-01-01 00:00:00"
 "page_view","http://127.0.0.1:53950/","Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0","f0114919-4dea-491f-b719-d63d5bd972ff","1970-01-01 00:00:00"

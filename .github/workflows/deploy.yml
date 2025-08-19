@@ -51,14 +51,12 @@ jobs:
       - name: Set images to :latest
         shell: powershell
         run: |
-          kubectl set image deploy/game-service        game-service=${{ secrets.DOCKERHUB_USERNAME }}/game-service:latest
           kubectl set image deploy/analytics-service   analytics-service=${{ secrets.DOCKERHUB_USERNAME }}/analytics-service:latest
           kubectl set image deploy/frontend            frontend=${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest
 
       - name: Wait for rollouts (zero-downtime rolling update)
         shell: powershell
         run: |
-          kubectl rollout status deploy/game-service        --timeout=180s
           kubectl rollout status deploy/analytics-service   --timeout=180s
           kubectl rollout status deploy/frontend            --timeout=180s
 
@@ -148,6 +146,112 @@ jobs:
             # Make cleanup best-effort; don't fail if the process already exited
             if ($pf -and (Get-Process -Id $pf.Id -ErrorAction SilentlyContinue)) {
               Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Blue-Green deploy – game-service
+        shell: powershell
+        run: |
+          # --- 0) Ensure blue/green resources exist (first run safety) ---
+          if (-not (kubectl get deploy game-service-blue -o name 2>$null) `
+              -or -not (kubectl get deploy game-service-green -o name 2>$null) `
+              -or -not (kubectl get svc game-service -o name 2>$null)) {
+            Write-Host "Applying k8s/game-bluegreen-deployment.yaml (first-run bootstrap)…"
+            kubectl apply -f k8s/game-bluegreen-deployment.yaml
+          }
+
+          # --- 1) Read current live color from Service selector ---
+          $svc = kubectl get svc game-service -o json | ConvertFrom-Json
+          $currentColor = $null
+          if ($svc.spec -and $svc.spec.selector -and $svc.spec.selector.color) {
+            $currentColor = $svc.spec.selector.color
+          }
+          if ([string]::IsNullOrEmpty($currentColor)) {
+            throw "game-service Service has no 'color' selector. Did you apply the blue/green manifests?"
+          }
+          Write-Host "Current live color (game-service):" $currentColor
+
+          # --- 2) Decide inactive color ---
+          $inactive = if ($currentColor -eq "blue") { "green" } else { "blue" }
+          Write-Host "Inactive color (target for new version):" $inactive
+
+          # --- 3) Update INACTIVE deployment to the new image ---
+          $deployName = "game-service-$inactive"
+          $image = "${{ secrets.DOCKERHUB_USERNAME }}/game-service:latest"
+          kubectl set image deploy/$deployName game-service=$image
+
+          # --- 4) Wait until new pods are Ready ---
+          kubectl rollout status deploy/$deployName --timeout=180s
+
+          # --- 5) Smoke test INACTIVE color directly (by pod) ---
+          $pod = kubectl get pod -l app=game-service,color=$inactive -o jsonpath='{.items[0].metadata.name}'
+          if ([string]::IsNullOrWhiteSpace($pod)) { throw "No pod found for game-service color '$inactive'." }
+
+          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward pod/$pod 18001:8000"
+          try {
+            # wait a moment for the tunnel
+            foreach ($i in 1..10) {
+              try { Invoke-WebRequest -Uri http://127.0.0.1:18001/health -UseBasicParsing -TimeoutSec 2 | Out-Null; break } catch { Start-Sleep -Milliseconds 700 }
+            }
+
+            $h = Invoke-RestMethod -Uri http://127.0.0.1:18001/health -TimeoutSec 10
+            if ($h.status -ne "ok") { throw "game-service ($inactive) /health not ok" }
+
+            $g = Invoke-WebRequest -Uri http://127.0.0.1:18001/games -UseBasicParsing -TimeoutSec 15
+            if ($g.StatusCode -ne 200) { throw "game-service ($inactive) /games returned $($g.StatusCode)" }
+
+            Write-Host "Inactive color '$inactive' (game-service) passed smoke test."
+          }
+          finally {
+            if ($pf -and (Get-Process -Id $pf.Id -ErrorAction SilentlyContinue)) {
+              Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          # --- 6) Flip Service selector to INACTIVE color (promote) ---
+          $oldPref = $ErrorActionPreference; $ErrorActionPreference = 'Stop'
+          try {
+            $patchObj = @{
+              spec = @{
+                selector = @{
+                  app   = "game-service"
+                  color = $inactive
+                }
+              }
+            }
+            $patchJson = $patchObj | ConvertTo-Json -Depth 10
+            $tmp = Join-Path $env:TEMP ("svc-patch-game-{0}.json" -f ([System.Guid]::NewGuid()))
+            [System.IO.File]::WriteAllText($tmp, $patchJson, (New-Object System.Text.UTF8Encoding($false)))
+
+            kubectl patch service game-service --type=merge --patch-file="$tmp"
+
+            $now = kubectl get svc game-service -o jsonpath='{.spec.selector.color}'
+            Write-Host "game-service now points to color: $now"
+            if ($now -ne $inactive) { throw "Service selector did not flip (expected '$inactive', got '$now')." }
+          }
+          catch {
+            Write-Host "Patch failed; trying 'kubectl set selector' fallback..."
+            kubectl set selector service/game-service "app=game-service,color=$inactive"
+            $now2 = kubectl get svc game-service -o jsonpath='{.spec.selector.color}'
+            Write-Host "game-service now points to color (after fallback): $now2"
+            if ($now2 -ne $inactive) { throw "Service selector still didn't flip (expected '$inactive', got '$now2')." }
+          }
+          finally {
+            if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+            $ErrorActionPreference = $oldPref
+          }
+
+          # --- 7) Verify via Service after flip ---
+          $pf2 = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/game-service 18001:8000"
+          try {
+            Start-Sleep -Seconds 4
+            $final = Invoke-WebRequest -Uri http://127.0.0.1:18001/games -UseBasicParsing -TimeoutSec 20
+            if ($final.StatusCode -ne 200) { throw "game-service via Service failed post-flip ($($final.StatusCode))" }
+            Write-Host "game-service via Service OK after flip."
+          }
+          finally {
+            if ($pf2 -and (Get-Process -Id $pf2.Id -ErrorAction SilentlyContinue)) {
+              Stop-Process -Id $pf2.Id -Force -ErrorAction SilentlyContinue
             }
           }
 
