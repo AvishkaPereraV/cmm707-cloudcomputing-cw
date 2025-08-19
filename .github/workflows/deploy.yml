@@ -203,7 +203,11 @@ jobs:
           }
 
           # --- 6) Flip Service selector to INACTIVE color (promote) ---
-          $patch = '{"spec":{"selector":{"app":"order-service","color":"' + $inactive + '"}}}'
+          # Build JSON as a here-string so quotes are preserved on Windows PowerShell
+          $patch = @"
+          {"spec":{"selector":{"app":"order-service","color":"$inactive"}}}
+          "@
+
           kubectl patch service order-service --type=merge -p $patch
 
           # Verify flip
