@@ -203,9 +203,9 @@ jobs:
           }
 
           # --- 6) Flip Service selector to INACTIVE color (promote) ---
-          kubectl set selector service/order-service app=order-service color=$inactive --overwrite
-          $sel = kubectl get svc order-service -o jsonpath='{.spec.selector}'
-          Write-Host "Service selector is now: $sel"
+          $patchObj = @{ spec = @{ selector = @{ app = "order-service"; color = $inactive } } }
+          $patchJson = $patchObj | ConvertTo-Json -Depth 10
+          kubectl patch svc order-service --type merge -p $patchJson | Out-Host
 
           # --- (7) Verify via Service after flip
           $pf2 = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "kubectl port-forward svc/order-service 18003:8000"
