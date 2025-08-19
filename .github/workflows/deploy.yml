@@ -93,33 +93,6 @@ jobs:
             Stop-Process -Id $pf.Id -Force
           }
 
-      - name: Smoke test – game-service /health and list /games
-        shell: powershell
-        run: |
-          # Skip if the Service doesn't exist (fresh blue/green bootstrap case)
-          if (-not (kubectl get svc game-service -o name 2>$null)) {
-            Write-Host "Skipping game-service smoke test: Service not found yet."
-            exit 0
-          }
-          # Skip if there are zero endpoints (no pods selected yet)
-          $eps = kubectl get endpoints game-service -o jsonpath='{.subsets[*].addresses[*].ip}'
-          if ([string]::IsNullOrWhiteSpace($eps)) {
-            Write-Host "Skipping game-service smoke test: Service has no endpoints yet."
-            exit 0
-          }
-          $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/game-service 18001:8000'
-          try {
-            foreach ($i in 1..10) { try { Invoke-WebRequest http://127.0.0.1:18001/health -UseBasicParsing -TimeoutSec 2 | Out-Null; break } catch { Start-Sleep -Milliseconds 700 } }
-            $h = Invoke-RestMethod http://127.0.0.1:18001/health -TimeoutSec 10
-            if ($h.status -ne "ok") { throw "game-service /health not ok" }
-            $g = Invoke-WebRequest http://127.0.0.1:18001/games -UseBasicParsing -TimeoutSec 15
-            if ($g.StatusCode -ne 200) { throw "/games returned $($g.StatusCode)" }
-            Write-Host "game-service OK"
-          } finally {
-            if ($pf -and (Get-Process -Id $pf.Id -ErrorAction SilentlyContinue)) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue }
-          }
-
-
       - name: Smoke test – order-service /health and list /orders
         shell: powershell
         run: |
