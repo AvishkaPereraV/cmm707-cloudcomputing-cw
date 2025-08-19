@@ -2,8 +2,7 @@ name: Periodic Integration Tests
 
 on:
   schedule:
-    # Every 6 hours (UTC)
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *'   # every 6h UTC
   workflow_dispatch: {}
 
 jobs:
@@ -14,11 +13,9 @@ jobs:
       - name: Checkout (minimal)
         uses: actions/checkout@v3
 
-      # Allow PS in this job (process scope) on the runner
       - name: Allow PowerShell scripts (process scope)
         shell: powershell
-        run: |
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+        run: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -34,94 +31,98 @@ jobs:
           kubectl config current-context
           kubectl get nodes -o wide
 
-      - name: Helper – wait for live color & endpoints
-        shell: powershell
-        run: |
-          function Wait-ServiceReady($svcName, $port, $timeoutSec=180) {
-            $deadline = (Get-Date).AddSeconds($timeoutSec)
-
-            # If the Service uses blue/green, wait for the live Deployment to be Available
-            try {
-              $color = kubectl get svc $svcName -o jsonpath='{.spec.selector.color}'
-            } catch { $color = $null }
-
-            if ($color) {
-              $deploy = "$svcName-$color"
-              kubectl wait deploy/$deploy --for=condition=Available=True --timeout=${timeoutSec}s
-            }
-
-            # Wait until Endpoints exist (ready addresses present)
-            do {
-              $eps = kubectl get endpoints $svcName -o jsonpath='{.subsets[*].addresses[*].ip}' 2>$null
-              if ($eps) { break }
-              Start-Sleep -Seconds 2
-            } while ((Get-Date) -lt $deadline)
-
-            if (-not $eps) { throw "Service '$svcName' has no ready endpoints." }
-
-            # Quick local port check helper for later tests
-            function Wait-LocalPort($port, $limitSec=20) {
-              $t0 = Get-Date
-              while (((Get-Date) - $t0).TotalSeconds -lt $limitSec) {
-                if (Test-NetConnection 127.0.0.1 -Port $port -InformationLevel Quiet) { return $true }
-                Start-Sleep -Milliseconds 700
-              }
-              return $false
-            }
-
-            Set-Item -Path Env:TEST_WAIT_LOCALPORT -Value "defined"
-            Set-Variable -Name WaitLocalPort -Value ${function:Wait-LocalPort} -Scope Global
-          }
-
-          # Export function for later steps in this job
-          Set-Variable -Name WaitServiceReady -Value ${function:Wait-ServiceReady} -Scope Global
-
+      # --------- ANALYTICS ----------
       - name: Smoke test – analytics POST
         shell: powershell
         run: |
-          WaitServiceReady analytics-service 8000 180
+          # Wait for endpoints on the Service
+          $deadline = (Get-Date).AddSeconds(180)
+          do {
+            $eps = kubectl get endpoints analytics-service -o jsonpath='{.subsets[*].addresses[*].ip}' 2>$null
+            if ($eps) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if (-not $eps) { throw "analytics-service has no ready endpoints." }
+
+          # Port-forward svc:8000 -> 18002
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/analytics-service 18002:8000'
           try {
-            if (-not (Test-NetConnection 127.0.0.1 -Port 18002 -InformationLevel Quiet)) { Start-Sleep -Seconds 3 }
-            $body = @{event_type="smoke";page_url="/";user_agent="ci";session_id="ci-${{ github.run_id }}";ts=(Get-Date).ToString("o")} | ConvertTo-Json
+            # simple local port wait
+            1..15 | % { if (Test-NetConnection 127.0.0.1 -Port 18002 -InformationLevel Quiet) { $true; break } ; Start-Sleep 1 } | Out-Null
+            $body = @{event_type="smoke";page_url="/";user_agent="ci-periodic";session_id="ci-${{ github.run_id }}";ts=(Get-Date).ToString("o")} | ConvertTo-Json
             $r = Invoke-WebRequest http://127.0.0.1:18002/track -Method POST -ContentType 'application/json' -Body $body -UseBasicParsing -TimeoutSec 15
             if ($r.StatusCode -ne 200) { throw "POST /track returned $($r.StatusCode)" }
-          } finally { if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue } }
+            Write-Host "analytics-service OK"
+          } finally {
+            if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue }
+          }
 
+      # --------- FRONTEND ----------
       - name: Smoke test – frontend HTTP 200
         shell: powershell
         run: |
-          WaitServiceReady frontend 80 180
+          $deadline = (Get-Date).AddSeconds(180)
+          do {
+            $eps = kubectl get endpoints frontend -o jsonpath='{.subsets[*].addresses[*].ip}' 2>$null
+            if ($eps) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if (-not $eps) { throw "frontend has no ready endpoints." }
+
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/frontend 18080:80'
           try {
-            if (-not (Test-NetConnection 127.0.0.1 -Port 18080 -InformationLevel Quiet)) { Start-Sleep -Seconds 3 }
+            1..15 | % { if (Test-NetConnection 127.0.0.1 -Port 18080 -InformationLevel Quiet) { $true; break } ; Start-Sleep 1 } | Out-Null
             $r = Invoke-WebRequest http://127.0.0.1:18080 -UseBasicParsing -TimeoutSec 20
             if ($r.StatusCode -ne 200) { throw "Frontend returned $($r.StatusCode)" }
-          } finally { if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue } }
+            Write-Host "frontend OK"
+          } finally {
+            if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue }
+          }
 
+      # --------- GAME SERVICE ----------
       - name: Smoke test – game-service
         shell: powershell
         run: |
-          WaitServiceReady game-service 8000 180
+          $deadline = (Get-Date).AddSeconds(180)
+          do {
+            $eps = kubectl get endpoints game-service -o jsonpath='{.subsets[*].addresses[*].ip}' 2>$null
+            if ($eps) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if (-not $eps) { throw "game-service has no ready endpoints." }
+
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/game-service 18001:8000'
           try {
-            if (-not (Test-NetConnection 127.0.0.1 -Port 18001 -InformationLevel Quiet)) { Start-Sleep -Seconds 3 }
+            1..15 | % { if (Test-NetConnection 127.0.0.1 -Port 18001 -InformationLevel Quiet) { $true; break } ; Start-Sleep 1 } | Out-Null
             $h = Invoke-RestMethod http://127.0.0.1:18001/health -TimeoutSec 10
             if ($h.status -ne "ok") { throw "/health not ok" }
             $g = Invoke-WebRequest http://127.0.0.1:18001/games -UseBasicParsing -TimeoutSec 10
             if ($g.StatusCode -ne 200) { throw "/games returned $($g.StatusCode)" }
-          } finally { if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue } }
+            Write-Host "game-service OK"
+          } finally {
+            if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue }
+          }
 
+      # --------- ORDER SERVICE ----------
       - name: Smoke test – order-service
         shell: powershell
         run: |
-          WaitServiceReady order-service 8000 180
+          $deadline = (Get-Date).AddSeconds(180)
+          do {
+            $eps = kubectl get endpoints order-service -o jsonpath='{.subsets[*].addresses[*].ip}' 2>$null
+            if ($eps) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if (-not $eps) { throw "order-service has no ready endpoints." }
+
           $pf = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList 'kubectl port-forward svc/order-service 18003:8000'
           try {
-            if (-not (Test-NetConnection 127.0.0.1 -Port 18003 -InformationLevel Quiet)) { Start-Sleep -Seconds 3 }
+            1..15 | % { if (Test-NetConnection 127.0.0.1 -Port 18003 -InformationLevel Quiet) { $true; break } ; Start-Sleep 1 } | Out-Null
             $h = Invoke-RestMethod http://127.0.0.1:18003/health -TimeoutSec 10
             if ($h.status -ne "ok") { throw "/health not ok" }
             $o = Invoke-WebRequest http://127.0.0.1:18003/orders -UseBasicParsing -TimeoutSec 10
             if ($o.StatusCode -ne 200) { throw "/orders returned $($o.StatusCode)" }
-          } finally { if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue } }
-            
+            Write-Host "order-service OK"
+          } finally {
+            if ($pf) { Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue }
+          }
