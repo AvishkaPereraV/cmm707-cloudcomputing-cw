@@ -10,6 +10,13 @@ metadata:
     color: blue
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  revisionHistoryLimit: 2
+  progressDeadlineSeconds: 180
   selector:
     matchLabels:
       app: analytics-service
@@ -22,24 +29,26 @@ spec:
     spec:
       containers:
         - name: analytics-service
-          image: avishka20241889/analytics-service:latest  # CI will 'set image' to :latest anyway
+          image: avishka20241889/analytics-service:latest
           ports:
             - containerPort: 8000
-          # Use TCP probes so we don't rely on a /health endpoint
           readinessProbe:
-            tcpSocket:
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 3
-          livenessProbe:
-            tcpSocket:
-              port: 8000
+            tcpSocket: { port: 8000 }
             initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket: { port: 8000 }
+            initialDelaySeconds: 45
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
+          startupProbe:
+            tcpSocket: { port: 8000 }
+            failureThreshold: 30   # up to ~60s with period=2
+            periodSeconds: 2
+            timeoutSeconds: 2
 
 ---
 # ---------------------------------
@@ -54,6 +63,13 @@ metadata:
     color: green
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  revisionHistoryLimit: 2
+  progressDeadlineSeconds: 180
   selector:
     matchLabels:
       app: analytics-service
